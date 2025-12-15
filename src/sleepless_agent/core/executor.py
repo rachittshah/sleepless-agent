@@ -38,6 +38,8 @@ class ClaudeCodeExecutor:
         default_timeout: int = 3600,
         live_status_tracker: Optional[LiveStatusTracker] = None,
         default_model: str = "claude-sonnet-4-5-20250929",
+        fallback_model: Optional[str] = None,
+        max_thinking_tokens: Optional[int] = None,
     ):
         """Initialize Claude Code executor
 
@@ -45,10 +47,14 @@ class ClaudeCodeExecutor:
             workspace_root: Root directory for task workspaces
             default_timeout: Default timeout in seconds (not used by SDK directly)
             default_model: Default Claude model to use for all agents
+            fallback_model: Optional fallback model if default model fails
+            max_thinking_tokens: Optional max thinking tokens for extended thinking
         """
         self.workspace_root = Path(workspace_root)
         self.default_timeout = default_timeout
         self.default_model = default_model
+        self.fallback_model = fallback_model
+        self.max_thinking_tokens = max_thinking_tokens
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         self.live_status_tracker = live_status_tracker
         self._live_context: Dict[int, Dict[str, Optional[str]]] = {}
@@ -696,6 +702,8 @@ Output should be:
                 permission_mode="acceptEdits",
                 max_turns=config_max_turns,
                 model=self.default_model,
+                fallback_model=self.fallback_model,
+                max_thinking_tokens=self.max_thinking_tokens,
             )
 
             async for message in query(prompt=planner_prompt, options=options):
@@ -822,6 +830,8 @@ Please work through the plan systematically and update TodoWrite as you complete
                 permission_mode="acceptEdits",
                 max_turns=config_max_turns,
                 model=self.default_model,
+                fallback_model=self.fallback_model,
+                max_thinking_tokens=self.max_thinking_tokens,
             )
 
             async for message in query(prompt=worker_prompt, options=options):
@@ -1004,6 +1014,8 @@ Output should include:
                 permission_mode="acceptEdits",
                 max_turns=config_max_turns,
                 model=self.default_model,
+                fallback_model=self.fallback_model,
+                max_thinking_tokens=self.max_thinking_tokens,
             )
 
             async for message in query(prompt=evaluator_prompt, options=options):

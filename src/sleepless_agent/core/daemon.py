@@ -92,6 +92,8 @@ class SleeplessAgent:
             workspace_root=str(self.config.agent.workspace_root),
             live_status_tracker=self.live_status_tracker,
             default_model=self.config.claude_code.model,
+            fallback_model=getattr(self.config.claude_code, 'fallback_model', None),
+            max_thinking_tokens=getattr(self.config.claude_code, 'max_thinking_tokens', None),
         )
 
         self.results = ResultManager(

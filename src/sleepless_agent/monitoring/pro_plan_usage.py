@@ -59,12 +59,12 @@ class ProPlanUsageChecker:
 
     def __init__(
         self,
-        command: str = "claude usage",
+        command: str = "claude /usage",
     ):
         """Initialize usage checker
 
         Args:
-            command: CLI command to run (default: "claude usage")
+            command: CLI command to run (default: "claude /usage")
         """
         self.command = command
         self.last_check_time: Optional[datetime] = None

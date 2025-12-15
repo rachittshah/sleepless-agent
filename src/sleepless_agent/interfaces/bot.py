@@ -92,30 +92,28 @@ class SlackBot:
         text = req.payload.get("text", "").strip()
         user = req.payload["user_id"]
         channel = req.payload["channel_id"]
-        response_url = req.payload.get("response_url")
 
         logger.info(f"Slash command: {command} {text} from {user}")
 
         if command == "/task" or command == "/think":
             # Both commands now use unified handler with dynamic priority
-            self.handle_think_command(text, user, channel, response_url)
+            self.handle_think_command(text, user, channel)
         elif command == "/check":
-            self.handle_check_command(response_url)
+            self.handle_check_command(channel)
         elif command == "/cancel":
-            self.handle_cancel_command(text, response_url)
+            self.handle_cancel_command(text, channel)
         elif command == "/report":
-            self.handle_report_command(text, response_url)
+            self.handle_report_command(text, channel)
         elif command == "/trash":
-            self.handle_trash_command(text, response_url)
+            self.handle_trash_command(text, channel)
         else:
-            self.send_response(response_url, f"Unknown command: {command}")
+            self.send_response(channel, f"Unknown command: {command}")
 
     def handle_think_command(
         self,
         args: str,
         user_id: str,
-        channel_id: str,
-        response_url: str,
+        channel: str,
     ):
         """Handle /think command - unified handler for both tasks and thoughts
 
@@ -125,7 +123,7 @@ class SlackBot:
         Without --project: Creates THOUGHT priority one-time task
         """
         if not args:
-            self.send_response(response_url, "Usage: /think <description> [--project=<project_name>]")
+            self.send_response(channel, "Usage: /think <description> [--project=<project_name>]")
             return
 
         (
@@ -136,7 +134,7 @@ class SlackBot:
         ) = prepare_task_creation(args)
 
         if not cleaned_description.strip():
-            self.send_response(response_url, "Please provide a description")
+            self.send_response(channel, "Please provide a description")
             return
 
         # Determine priority based on whether project is provided
@@ -145,7 +143,7 @@ class SlackBot:
         self._create_task(
             description=cleaned_description.strip(),
             priority=priority,
-            response_url=response_url,
+            channel=channel,
             user_id=user_id,
             note=note,
             project_name=project_name,
@@ -156,7 +154,7 @@ class SlackBot:
         self,
         description: str,
         priority: TaskPriority,
-        response_url: str,
+        channel: str,
         user_id: str,
         note: Optional[str] = None,
         project_name: Optional[str] = None,
@@ -212,7 +210,7 @@ class SlackBot:
             project_info = f" [Project: {project_name}]" if project_name else ""
             fallback = f"{header_emoji} Task #{task.id} added to queue{project_info}: {description}"
 
-            self.send_response(response_url, message=fallback, blocks=blocks)
+            self.send_response(channel, message=fallback, blocks=blocks)
             logger.info(f"Task {task.id} added by {user_id}" + (f" [Project: {project_name}]" if project_name else ""))
 
         except Exception as e:
@@ -220,20 +218,20 @@ class SlackBot:
                 self._block_header("❌ Error Creating Task"),
                 self._block_section(f"Failed to add task: {str(e)}", markdown=True)
             ]
-            self.send_response(response_url, message=f"Failed to add task: {str(e)}", blocks=error_blocks)
+            self.send_response(channel, message=f"Failed to add task: {str(e)}", blocks=error_blocks)
             logger.error(f"Failed to add task: {e}")
 
-    def handle_check_command(self, response_url: str):
+    def handle_check_command(self, channel: str):
         """Handle /check command - comprehensive system status"""
         try:
             blocks = self._build_check_blocks()
             fallback_message = self._build_check_message()
-            self.send_response(response_url, message=fallback_message, blocks=blocks)
+            self.send_response(channel, message=fallback_message, blocks=blocks)
         except Exception as e:
-            self.send_response(response_url, f"Failed to get status: {str(e)}")
+            self.send_response(channel, f"Failed to get status: {str(e)}")
             logger.error(f"Failed to get status: {e}")
 
-    def handle_cancel_command(self, identifier_str: str, response_url: str):
+    def handle_cancel_command(self, identifier_str: str, channel: str):
         """Handle /cancel command - move task or project to trash
 
         Usage: /cancel <task_id> or /cancel <project_id_or_name>
@@ -244,7 +242,7 @@ class SlackBot:
                     self._block_header("ℹ️ Cancel Command Usage"),
                     self._block_section("*Usage:* `/cancel <task_id_or_project>`", markdown=True)
                 ]
-                self.send_response(response_url, message="Usage: /cancel <task_id_or_project>", blocks=usage_blocks)
+                self.send_response(channel, message="Usage: /cancel <task_id_or_project>", blocks=usage_blocks)
                 return
 
             # Try to parse as integer (task ID)
@@ -260,7 +258,7 @@ class SlackBot:
                         ),
                         self._block_context(f"Task: {self._escape_slack(shorten(task.description, 100))}")
                     ]
-                    self.send_response(response_url, message=f"Task #{task_id} moved to trash", blocks=blocks)
+                    self.send_response(channel, message=f"Task #{task_id} moved to trash", blocks=blocks)
                 else:
                     blocks = [
                         self._block_header("❌ Task Not Found"),
@@ -269,7 +267,7 @@ class SlackBot:
                             markdown=True
                         )
                     ]
-                    self.send_response(response_url, message=f"Task #{task_id} not found or already running", blocks=blocks)
+                    self.send_response(channel, message=f"Task #{task_id} not found or already running", blocks=blocks)
                 return
             except ValueError:
                 pass
@@ -283,7 +281,7 @@ class SlackBot:
                     self._block_header("❌ Project Not Found"),
                     self._block_section(f"Project not found: *{self._escape_slack(identifier_str)}*", markdown=True)
                 ]
-                self.send_response(response_url, message=f"Project not found: {identifier_str}", blocks=blocks)
+                self.send_response(channel, message=f"Project not found: {identifier_str}", blocks=blocks)
                 return
 
             # Soft delete tasks from database
@@ -317,29 +315,26 @@ class SlackBot:
             ]
 
             fallback = f"✅ Moved {count} task(s) to trash. {workspace_status}"
-            self.send_response(response_url, message=fallback, blocks=blocks)
+            self.send_response(channel, message=fallback, blocks=blocks)
 
         except Exception as e:
             error_blocks = [
                 self._block_header("❌ Error Cancelling"),
                 self._block_section(f"Failed to move to trash: {str(e)}", markdown=True)
             ]
-            self.send_response(response_url, message=f"Failed to move to trash: {str(e)}", blocks=error_blocks)
+            self.send_response(channel, message=f"Failed to move to trash: {str(e)}", blocks=error_blocks)
             logger.error(f"Failed to cancel: {e}")
 
-    def send_response(self, response_url: str, message: str = None, blocks: list = None):
-        """Send response to Slack
+    def send_response(self, channel: str, message: str = None, blocks: list = None):
+        """Send response to Slack using WebClient API for Socket Mode
 
         Args:
-            response_url: Slack response URL
+            channel: Slack channel ID where message should be sent
             message: Plain text fallback message
             blocks: Block Kit blocks for rich formatting
         """
         try:
-            import requests
-            payload = {
-                "response_type": "in_channel"  # Make responses visible in channel
-            }
+            payload = {}
 
             # If blocks provided, use them; otherwise use plain text
             if blocks:
@@ -351,11 +346,15 @@ class SlackBot:
             if not payload.get("text") and not payload.get("blocks"):
                 payload["text"] = "No message"
 
-            requests.post(
-                response_url,
-                json=payload,
-                timeout=5,
+            # Use WebClient API instead of response_url for Socket Mode
+            self.client.chat_postMessage(
+                channel=channel,
+                **payload
             )
+        except SlackApiError as e:
+            error_detail = e.response.get('error', 'unknown')
+            error_msg = e.response.get('errors', [])
+            logger.error(f"Failed to send response: {error_detail}, details: {error_msg}, channel: {channel}")
         except Exception as e:
             logger.error(f"Failed to send response: {e}")
 
@@ -378,7 +377,7 @@ class SlackBot:
         except SlackApiError as e:
             logger.error(f"Failed to send thread message: {e}")
 
-    def handle_trash_command(self, args: str, response_url: str):
+    def handle_trash_command(self, args: str, channel: str):
         """Handle /trash command - manage trash (list, restore, empty)
 
         Usage:
@@ -400,7 +399,7 @@ class SlackBot:
                         self._block_header("🗑️ Trash"),
                         self._block_section("Trash is empty", markdown=True)
                     ]
-                    self.send_response(response_url, message="🗑️ Trash is empty", blocks=blocks)
+                    self.send_response(channel, message="🗑️ Trash is empty", blocks=blocks)
                     return
 
                 items = list(trash_dir.iterdir())
@@ -409,7 +408,7 @@ class SlackBot:
                         self._block_header("🗑️ Trash"),
                         self._block_section("Trash is empty", markdown=True)
                     ]
-                    self.send_response(response_url, message="🗑️ Trash is empty", blocks=blocks)
+                    self.send_response(channel, message="🗑️ Trash is empty", blocks=blocks)
                     return
 
                 blocks = [self._block_header("🗑️ Trash Contents")]
@@ -424,13 +423,13 @@ class SlackBot:
                         ))
 
                 fallback = f"🗑️ Trash has {len(items)} item(s)"
-                self.send_response(response_url, message=fallback, blocks=blocks)
+                self.send_response(channel, message=fallback, blocks=blocks)
             except Exception as e:
                 error_blocks = [
                     self._block_header("❌ Error Listing Trash"),
                     self._block_section(f"Failed to list trash: {str(e)}", markdown=True)
                 ]
-                self.send_response(response_url, message=f"Failed to list trash: {str(e)}", blocks=error_blocks)
+                self.send_response(channel, message=f"Failed to list trash: {str(e)}", blocks=error_blocks)
                 logger.error(f"Failed to list trash: {e}")
 
         elif subcommand == "restore":
@@ -440,7 +439,7 @@ class SlackBot:
                         self._block_header("ℹ️ Restore Usage"),
                         self._block_section("*Usage:* `/trash restore <project_id_or_name>`", markdown=True)
                     ]
-                    self.send_response(response_url, message="Usage: /trash restore <project_id_or_name>", blocks=blocks)
+                    self.send_response(channel, message="Usage: /trash restore <project_id_or_name>", blocks=blocks)
                     return
 
                 trash_dir = Path("workspace") / "trash"
@@ -449,7 +448,7 @@ class SlackBot:
                         self._block_header("🗑️ Trash Empty"),
                         self._block_section("Trash is empty", markdown=True)
                     ]
-                    self.send_response(response_url, message="🗑️ Trash is empty", blocks=blocks)
+                    self.send_response(channel, message="🗑️ Trash is empty", blocks=blocks)
                     return
 
                 # Find matching item in trash
@@ -461,7 +460,7 @@ class SlackBot:
                         self._block_header("❌ Project Not Found"),
                         self._block_section(f"Project not found in trash: *{self._escape_slack(remaining_args)}*", markdown=True)
                     ]
-                    self.send_response(response_url, message=f"Project not found in trash: {remaining_args}", blocks=blocks)
+                    self.send_response(channel, message=f"Project not found in trash: {remaining_args}", blocks=blocks)
                     return
 
                 if len(matching_items) > 1:
@@ -473,7 +472,7 @@ class SlackBot:
                         blocks.append(self._block_context(f"• {self._escape_slack(item.name)}"))
 
                     fallback = f"Multiple matches found for '{remaining_args}'"
-                    self.send_response(response_url, message=fallback, blocks=blocks)
+                    self.send_response(channel, message=fallback, blocks=blocks)
                     return
 
                 trash_item = matching_items[0]
@@ -485,7 +484,7 @@ class SlackBot:
                         self._block_header("❌ Invalid Format"),
                         self._block_section(f"Invalid trash item format: *{self._escape_slack(trash_item.name)}*", markdown=True)
                     ]
-                    self.send_response(response_url, message=f"Invalid trash item format: {trash_item.name}", blocks=blocks)
+                    self.send_response(channel, message=f"Invalid trash item format: {trash_item.name}", blocks=blocks)
                     return
 
                 # Reconstruct project_id (everything except the last timestamp)
@@ -498,7 +497,7 @@ class SlackBot:
                         self._block_header("⚠️ Workspace Exists"),
                         self._block_section(f"Workspace already exists at *{self._escape_slack(str(workspace_path))}*", markdown=True)
                     ]
-                    self.send_response(response_url, message=f"Workspace already exists at {workspace_path}", blocks=blocks)
+                    self.send_response(channel, message=f"Workspace already exists at {workspace_path}", blocks=blocks)
                     return
 
                 trash_item.rename(workspace_path)
@@ -510,13 +509,13 @@ class SlackBot:
                 ]
 
                 fallback = f"✅ Restored project '{project_id}' from trash"
-                self.send_response(response_url, message=fallback, blocks=blocks)
+                self.send_response(channel, message=fallback, blocks=blocks)
             except Exception as e:
                 error_blocks = [
                     self._block_header("❌ Error Restoring"),
                     self._block_section(f"Failed to restore from trash: {str(e)}", markdown=True)
                 ]
-                self.send_response(response_url, message=f"Failed to restore from trash: {str(e)}", blocks=error_blocks)
+                self.send_response(channel, message=f"Failed to restore from trash: {str(e)}", blocks=error_blocks)
                 logger.error(f"Failed to restore from trash: {e}")
 
         elif subcommand == "empty":
@@ -527,7 +526,7 @@ class SlackBot:
                         self._block_header("🗑️ Trash"),
                         self._block_section("Trash is already empty", markdown=True)
                     ]
-                    self.send_response(response_url, message="🗑️ Trash is already empty", blocks=blocks)
+                    self.send_response(channel, message="🗑️ Trash is already empty", blocks=blocks)
                     return
 
                 count = 0
@@ -540,13 +539,13 @@ class SlackBot:
                     self._block_header("✅ Trash Emptied"),
                     self._block_section(f"Deleted *{count}* item(s) from trash", markdown=True)
                 ]
-                self.send_response(response_url, message=f"✅ Deleted {count} item(s) from trash", blocks=blocks)
+                self.send_response(channel, message=f"✅ Deleted {count} item(s) from trash", blocks=blocks)
             except Exception as e:
                 error_blocks = [
                     self._block_header("❌ Error Emptying Trash"),
                     self._block_section(f"Failed to empty trash: {str(e)}", markdown=True)
                 ]
-                self.send_response(response_url, message=f"Failed to empty trash: {str(e)}", blocks=error_blocks)
+                self.send_response(channel, message=f"Failed to empty trash: {str(e)}", blocks=error_blocks)
                 logger.error(f"Failed to empty trash: {e}")
 
         else:
@@ -561,9 +560,9 @@ class SlackBot:
                 )
             ]
             fallback = "Usage: /trash list|restore|empty"
-            self.send_response(response_url, message=fallback, blocks=blocks)
+            self.send_response(channel, message=fallback, blocks=blocks)
 
-    def handle_report_command(self, identifier: str, response_url: str):
+    def handle_report_command(self, identifier: str, channel: str):
         """Handle /report command - unified report handler (task/daily/project)
 
         Usage:
@@ -579,7 +578,7 @@ class SlackBot:
                     self._block_header("❌ Error"),
                     self._block_section("Report generator not available", markdown=True)
                 ]
-                self.send_response(response_url, message="Report generator not available", blocks=error_blocks)
+                self.send_response(channel, message="Report generator not available", blocks=error_blocks)
                 return
 
             args = identifier.strip() if identifier else ""
@@ -608,7 +607,7 @@ class SlackBot:
                     blocks.append(self._block_section("*📦 Project Reports:*\nNo project reports available", markdown=True))
 
                 fallback = f"Available: {len(daily_reports)} daily reports, {len(project_reports)} project reports"
-                self.send_response(response_url, message=fallback, blocks=blocks)
+                self.send_response(channel, message=fallback, blocks=blocks)
                 return
 
             # Determine if it's a date or project
@@ -675,14 +674,14 @@ class SlackBot:
                 blocks.append(self._block_context("⚠️ Report truncated - use CLI for full content: `sle report`"))
 
             fallback = f"{report_title}\n{report}"
-            self.send_response(response_url, message=fallback, blocks=blocks)
+            self.send_response(channel, message=fallback, blocks=blocks)
 
         except Exception as e:
             error_blocks = [
                 self._block_header("❌ Error Getting Report"),
                 self._block_section(f"Failed to get report: {str(e)}", markdown=True)
             ]
-            self.send_response(response_url, message=f"Failed to get report: {str(e)}", blocks=error_blocks)
+            self.send_response(channel, message=f"Failed to get report: {str(e)}", blocks=error_blocks)
             logger.error(f"Failed to get report: {e}")
 
     def _block_header(self, text: str) -> dict:
@@ -702,13 +701,16 @@ class SlackBot:
 
     def _block_section(self, text: str, markdown: bool = False) -> dict:
         """Create a section block with text"""
+        text_obj = {
+            "type": "mrkdwn" if markdown else "plain_text",
+            "text": text
+        }
+        # Only add emoji property for plain_text type
+        if not markdown:
+            text_obj["emoji"] = True
         return {
             "type": "section",
-            "text": {
-                "type": "mrkdwn" if markdown else "plain_text",
-                "text": text,
-                "emoji": True
-            }
+            "text": text_obj
         }
 
     def _block_section_fields(self, fields: list[dict]) -> dict:
